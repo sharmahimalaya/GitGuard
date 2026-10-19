@@ -489,10 +489,8 @@ Now test the complete live workflow with a real pull request on GitHub:
    ```bash
    git checkout -b test/gitguard-security-audit
    ```
-3. **Add a file containing known security flaws**:
-   Copy the sample vulnerable file provided in `demo/vulnerable_app.py`:
+3. **Add test code or a sample file with test changes**:
    ```bash
-   cp path/to/GitReviewSecutiryAuditor/demo/vulnerable_app.py app_security_test.py
    git add app_security_test.py
    git commit -m "feat: add user authentication and database queries"
    git push origin test/gitguard-security-audit

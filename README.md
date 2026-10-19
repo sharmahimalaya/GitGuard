@@ -929,15 +929,15 @@ python scripts/replay_webhook.py \
   --installation-id 12345678
 ```
 
-### 2. Demo Target (`demo/vulnerable_app.py`)
-Create a branch and Pull Request adding `demo/vulnerable_app.py`. The auditor will automatically analyze the diff and leave inline comments for:
-- 🔴 **[CRITICAL] Hardcoded API Keys / AWS Secrets** (CWE-798)
+### 2. Live End-to-End Pull Request Testing
+Create a branch and open a Pull Request with code changes in your repository. GitGuard will automatically analyze the pull request diff and post inline review comments for:
+- 🔴 **[CRITICAL] Hardcoded API Keys / Secrets** (CWE-798)
 - 🔴 **[CRITICAL] SQL Injection** (CWE-89)
-- 🔴 **[CRITICAL] Remote Code Execution via eval()** (CWE-94)
+- 🔴 **[CRITICAL] Remote Code Execution via eval() / exec()** (CWE-94)
 - 🟠 **[HIGH] Command Injection** (CWE-78)
 - 🟠 **[HIGH] Path Traversal** (CWE-22)
-- 🟡 **[MEDIUM] Weak Cryptographic Hash (MD5)** (CWE-327)
-- 🛡️ It will ignore the embedded prompt injection attempt.
+- 🟡 **[MEDIUM] Weak Cryptographic Algorithms** (CWE-327)
+- 🛡️ Resists prompt injection attempts embedded within code diffs or comments.
 
 ---
 
