@@ -1,0 +1,155 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Automated Git Code Review & Security Auditor using GenAI (Gemma / Bedrock), SAM, HTTP API, Lambda, and DynamoDB.
+
+Parameters:
+  GitHubSecretArn:
+    Type: String
+    Description: ARN of the AWS Secrets Manager secret containing app_id, private_key, and webhook_secret
+  BedrockModelId:
+    Type: String
+    Default: us.amazon.nova-micro-v1:0
+    Description: Bedrock Model ID or Cross-Region Inference Profile
+  MaxDiffSize:
+    Type: Number
+    Default: 100000
+    Description: Maximum cumulative characters of diff to process per PR
+
+Globals:
+  Function:
+    Runtime: python3.12
+    MemorySize: 512
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+
+Resources:
+  # HTTP API Gateway
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+
+  # DynamoDB Table for Idempotency and Audit Findings
+  SecurityAuditTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-SecurityAudit"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # CloudWatch Log Groups with 14-day retention
+  IngestLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${IngestFunction}"
+      RetentionInDays: 14
+
+  WorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${WorkerFunction}"
+      RetentionInDays: 14
+
+  # Ingest Lambda Function
+  IngestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/ingest/
+      Handler: app.lambda_handler
+      Timeout: 10
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref SecurityAuditTable
+          WORKER_FUNCTION_ARN: !GetAtt WorkerFunction.Arn
+          GITHUB_SECRET_ARN: !Ref GitHubSecretArn
+      Policies:
+        - Statement:
+            - Sid: DynamoDBIdempotencyWrite
+              Effect: Allow
+              Action:
+                - dynamodb:PutItem
+              Resource: !GetAtt SecurityAuditTable.Arn
+            - Sid: InvokeWorkerAsync
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt WorkerFunction.Arn
+            - Sid: ReadSecretsManagerSecret
+              Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref GitHubSecretArn
+      Events:
+        WebhookPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /webhook
+            Method: POST
+
+  # Worker Lambda Function
+  WorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/worker/
+      Handler: app.lambda_handler
+      Timeout: 300
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref SecurityAuditTable
+          GITHUB_SECRET_ARN: !Ref GitHubSecretArn
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          MAX_DIFF_SIZE: !Ref MaxDiffSize
+      Policies:
+        - Statement:
+            - Sid: DynamoDBAccess
+              Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:GetItem
+                - dynamodb:Query
+              Resource: !GetAtt SecurityAuditTable.Arn
+            - Sid: ReadSecretsManagerSecret
+              Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref GitHubSecretArn
+            - Sid: BedrockInvokeModelAccess
+              Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - !Sub "arn:aws:bedrock:*::foundation-model/*"
+                - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:provisioned-model/*"
+                - !Sub "arn:aws:sagemaker:${AWS::Region}:${AWS::AccountId}:endpoint/*"
+
+Outputs:
+  WebhookEndpoint:
+    Description: HTTP API endpoint URL to configure in GitHub Webhook settings
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/webhook"
+  SecurityAuditTableName:
+    Description: Name of DynamoDB table storing audit results
+    Value: !Ref SecurityAuditTable
+  IngestFunctionArn:
+    Description: ARN of Ingest Lambda
+    Value: !GetAtt IngestFunction.Arn
+  WorkerFunctionArn:
+    Description: ARN of Worker Lambda
+    Value: !GetAtt WorkerFunction.Arn

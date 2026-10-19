@@ -1,0 +1,1 @@
+# Ingest Lambda uses Python standard library and pre-installed boto3
